@@ -23,7 +23,7 @@ wheels/
 .installed.cfg
 *.egg
 .env
-
+.venv/
 # IDE
 .vscode/
 .idea/

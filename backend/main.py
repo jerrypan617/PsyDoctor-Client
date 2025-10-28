@@ -5,7 +5,7 @@ from typing import List
 import requests
 
 # ============ 配置 ============
-SERVER_URL = "http://118.195.153.228:8000"
+SERVER_URL = "http://129.211.218.58:8000"
 TIMEOUT = 60
 # ==============================
 
@@ -14,9 +14,9 @@ app = FastAPI(title="心理医生聊天 API - 云服务器代理")
 # 配置 CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:3000"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -32,6 +32,11 @@ class ChatResponse(BaseModel):
 @app.get("/")
 async def root():
     return {"message": "心理医生聊天 API 运行中"}
+
+@app.options("/chat")
+async def chat_options():
+    """处理 CORS 预检请求"""
+    return {"message": "OK"}
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
