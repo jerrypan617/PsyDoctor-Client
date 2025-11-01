@@ -4,7 +4,26 @@ import MessageInput from './components/MessageInput'
 import ConversationList from './components/ConversationList'
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001'
+
+// 调试：确认API_URL配置
+console.log('前端API_URL配置:', API_URL)
+
+// 检查API_URL是否指向本地后端（对话历史管理必须在本地后端）
+const isLocalBackend = API_URL.includes('localhost') || 
+                       API_URL.includes('127.0.0.1') || 
+                       API_URL.startsWith('http://localhost') ||
+                       API_URL.startsWith('http://127.0.0.1')
+const isCloudServer = API_URL.includes('129.211.164.244') || (!isLocalBackend && API_URL !== 'http://localhost:8000')
+
+if (isCloudServer) {
+  console.error('❌ 错误: 前端API_URL未指向本地后端！')
+  console.error('❌ 当前配置:', API_URL)
+  console.error('❌ 对话历史管理（PUT/DELETE）必须通过本地后端处理。')
+  console.error('❌ 请设置环境变量: VITE_API_URL=http://localhost:8001')
+  console.error('❌ 或在 frontend/.env.local 文件中配置: VITE_API_URL=http://localhost:8001')
+  console.error('❌ 配置后需要重启前端开发服务器！')
+}
 
 // 生成对话标题（基于首条消息）
 const generateTitle = (messages) => {
@@ -52,10 +71,60 @@ function App() {
     }
   }, [])
 
-  // 保存对话列表到 localStorage
-  const saveConversations = (updated) => {
+  // 同步对话到后端
+  const syncConversationToBackend = async (conversation) => {
+    // 如果API_URL未指向本地后端，跳过同步（对话历史管理必须在本地后端）
+    if (!isLocalBackend) {
+      console.warn(`⚠️ 跳过同步：API_URL (${API_URL}) 未指向本地后端，对话历史仅保存在localStorage`)
+      return
+    }
+    
+    try {
+      const syncUrl = `${API_URL}/conversation/${conversation.id}`
+      console.log(`🔄 同步对话到后端: ${conversation.id}`, {
+        messageCount: conversation.messages?.length || 0,
+        title: conversation.title,
+        url: syncUrl  // 显示实际请求的URL
+      })
+      await axios.put(syncUrl, {
+        messages: conversation.messages || [],
+        title: conversation.title,
+        updatedAt: conversation.updatedAt
+      })
+      console.log(`✅ 对话 ${conversation.id} 同步成功`)
+    } catch (error) {
+      console.error(`❌ 同步对话 ${conversation.id} 失败:`, error)
+      if (error.response) {
+        console.error('错误详情:', {
+          status: error.response.status,
+          data: error.response.data,
+          url: error.config?.url
+        })
+        if (error.response.status === 404) {
+          console.error('❌ 404错误：PUT端点不存在！')
+          console.error('❌ 请确认前端API_URL指向本地后端 (http://localhost:8001)')
+          console.error('❌ 本地后端必须包含 PUT /conversation/{id} 端点')
+        }
+      }
+      // 静默失败，不影响前端用户体验
+    }
+  }
+
+  // 保存对话列表到 localStorage 并同步到后端
+  const saveConversations = async (updated) => {
+    // 先保存到 localStorage
     localStorage.setItem('conversations', JSON.stringify(updated))
     setConversations(updated)
+    
+    // 异步同步到后端（不阻塞UI，但记录日志）
+    console.log(`准备同步 ${updated.length} 个对话到后端`)
+    Promise.all(updated.map(conv => syncConversationToBackend(conv)))
+      .then(() => {
+        console.log(`所有对话同步完成`)
+      })
+      .catch(err => {
+        console.error('批量同步对话失败:', err)
+      })
   }
 
   const scrollToBottom = () => {
@@ -69,8 +138,15 @@ function App() {
   const sendMessage = async (message) => {
     if (!message.trim()) return
 
-    const userMessage = { role: 'user', content: message }
-    const updatedMessages = [...messages, userMessage]
+    const userMessage = { 
+      role: 'user', 
+      content: message,
+      timestamp: new Date().toISOString()
+    }
+    const updatedMessages = [...messages.map(msg => ({
+      ...msg,
+      timestamp: msg.timestamp || new Date().toISOString()
+    })), userMessage]
     setMessages(updatedMessages)
     setIsLoading(true)
 
@@ -83,20 +159,26 @@ function App() {
       
       const response = await axios.post(`${API_URL}/chat`, {
         message,
-        conversation_history: conversationHistory
+        conversation_history: conversationHistory,
+        conversation_id: currentConversationId || undefined  // 传递对话ID用于RAG检索
       })
 
       const assistantMessage = {
         role: 'assistant',
-        content: response.data.response
+        content: response.data.response,
+        timestamp: new Date().toISOString()
       }
 
       const finalMessages = [...updatedMessages, assistantMessage]
       setMessages(finalMessages)
       
+      // 获取后端返回的conversation_id（如果后端生成了新的）
+      const backendConversationId = response.data.conversation_id || currentConversationId
+      
       // 创建或更新对话
       if (!currentConversationId) {
-        const newId = Date.now().toString()
+        // 使用后端返回的ID或生成新ID
+        const newId = backendConversationId || Date.now().toString()
         const newConv = {
           id: newId,
           title: generateTitle(finalMessages),
@@ -104,9 +186,14 @@ function App() {
           updatedAt: formatDate(Date.now())
         }
         setCurrentConversationId(newId)
-        saveConversations([newConv, ...conversations])
+        await saveConversations([newConv, ...conversations])
       } else {
-        updateConversation(currentConversationId, finalMessages)
+        // 确保使用后端返回的ID（如果后端有更新）
+        const finalConversationId = backendConversationId || currentConversationId
+        if (backendConversationId && backendConversationId !== currentConversationId) {
+          setCurrentConversationId(backendConversationId)
+        }
+        updateConversation(finalConversationId, finalMessages)
       }
     } catch (error) {
       console.error('Error:', error)
@@ -125,7 +212,7 @@ function App() {
     }
   }
 
-  const updateConversation = (id, msgs) => {
+  const updateConversation = async (id, msgs) => {
     const updated = conversations.map(conv => {
       if (conv.id === id) {
         const title = generateTitle(msgs)
@@ -138,10 +225,10 @@ function App() {
       }
       return conv
     })
-    saveConversations(updated)
+    await saveConversations(updated)
   }
 
-  const newConversation = () => {
+  const newConversation = async () => {
     const newId = Date.now().toString()
     const newConv = {
       id: newId,
@@ -150,7 +237,7 @@ function App() {
       updatedAt: formatDate(Date.now())
     }
     const updated = [newConv, ...conversations]
-    saveConversations(updated)
+    await saveConversations(updated)
     setCurrentConversationId(newId)
     setMessages([])
   }
@@ -163,17 +250,62 @@ function App() {
     }
   }
 
-  const deleteConversation = (id) => {
-    const updated = conversations.filter(c => c.id !== id)
-    saveConversations(updated)
+  const deleteConversation = async (id) => {
+    // 如果API_URL未指向本地后端，跳过后端删除（对话历史管理必须在本地后端）
+    if (!isLocalBackend) {
+      console.warn(`⚠️ 跳过后端删除：API_URL (${API_URL}) 未指向本地后端，仅从localStorage删除`)
+      // 直接更新前端状态
+      const updated = conversations.filter(c => c.id !== id)
+      saveConversations(updated)
+      
+      if (currentConversationId === id) {
+        if (updated.length > 0) {
+          setCurrentConversationId(updated[0].id)
+          setMessages(updated[0].messages)
+        } else {
+          setCurrentConversationId(null)
+          setMessages([])
+        }
+      }
+      return
+    }
     
-    if (currentConversationId === id) {
-      if (updated.length > 0) {
-        setCurrentConversationId(updated[0].id)
-        setMessages(updated[0].messages)
-      } else {
-        setCurrentConversationId(null)
-        setMessages([])
+    try {
+      // 调用后端API删除对话
+      await axios.delete(`${API_URL}/conversation/${id}`)
+      
+      // 更新前端状态
+      const updated = conversations.filter(c => c.id !== id)
+      saveConversations(updated)
+      
+      if (currentConversationId === id) {
+        if (updated.length > 0) {
+          setCurrentConversationId(updated[0].id)
+          setMessages(updated[0].messages)
+        } else {
+          setCurrentConversationId(null)
+          setMessages([])
+        }
+      }
+    } catch (error) {
+      console.error('删除对话失败:', error)
+      if (error.response?.status === 404) {
+        console.error('❌ 404错误：DELETE端点不存在！')
+        console.error('❌ 请确认前端API_URL指向本地后端 (http://localhost:8000)')
+        console.error('❌ 本地后端必须包含 DELETE /conversation/{id} 端点')
+      }
+      // 即使后端删除失败，也更新前端状态（保持用户体验）
+      const updated = conversations.filter(c => c.id !== id)
+      saveConversations(updated)
+      
+      if (currentConversationId === id) {
+        if (updated.length > 0) {
+          setCurrentConversationId(updated[0].id)
+          setMessages(updated[0].messages)
+        } else {
+          setCurrentConversationId(null)
+          setMessages([])
+        }
       }
     }
   }
