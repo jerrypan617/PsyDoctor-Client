@@ -29,22 +29,27 @@ const MessageInput = ({ onSendMessage, disabled }) => {
   return (
     <form onSubmit={handleSubmit} className="flex items-end space-x-3">
       <div className="flex-1 relative">
-        <textarea
-          ref={textareaRef}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={handleKeyPress}
-          placeholder="输入你的消息... (Shift + Enter 换行)"
-          disabled={disabled}
-          rows={1}
-          className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ maxHeight: '120px' }}
-        />
+        <div className="relative">
+          <textarea
+            ref={textareaRef}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={handleKeyPress}
+            placeholder="输入你的消息... (Shift + Enter 换行)"
+            disabled={disabled}
+            rows={1}
+            className="w-full px-5 py-4 bg-white border-2 border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-400 resize-none disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md focus:shadow-lg text-gray-700 placeholder-gray-400"
+            style={{ maxHeight: '120px' }}
+          />
+          <div className="absolute bottom-2 right-3 text-xs text-gray-400 pointer-events-none">
+            {message.length > 0 && `${message.length}`}
+          </div>
+        </div>
       </div>
       <button
         type="submit"
         disabled={!message.trim() || disabled}
-        className="px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl hover:from-blue-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg shadow-blue-500/30"
+        className="px-6 py-4 bg-gradient-to-r from-orange-500 via-red-500 to-pink-600 text-white rounded-2xl hover:from-orange-600 hover:via-red-600 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg shadow-orange-500/30 hover:shadow-xl hover:shadow-orange-500/40 transform hover:scale-105 active:scale-95 disabled:transform-none"
       >
         <svg
           className="w-5 h-5"
